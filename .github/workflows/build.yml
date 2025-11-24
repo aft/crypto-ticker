@@ -30,13 +30,14 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --windowed --name CryptoTicker --icon=icon.ico main.py 2>$null || pyinstaller --onefile --windowed --name CryptoTicker main.py
+          pyinstaller --onefile --windowed --name CryptoTicker --icon=logo.ico main.py 2>$null || pyinstaller --onefile --windowed --name CryptoTicker main.py
+          mv dist/CryptoTicker.exe dist/CryptoTicker-Windows.exe
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: CryptoTicker-Windows
-          path: dist/CryptoTicker.exe
+          path: dist/CryptoTicker-Windows.exe
 
   build-macos:
     runs-on: macos-latest
@@ -57,12 +58,13 @@ jobs:
       - name: Build executable
         run: |
           pyinstaller --onefile --windowed --name CryptoTicker main.py
+          mv dist/CryptoTicker dist/CryptoTicker-macOS
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: CryptoTicker-macOS
-          path: dist/CryptoTicker.app
+          path: dist/CryptoTicker-macOS
 
   build-linux:
     runs-on: ubuntu-latest
@@ -88,12 +90,13 @@ jobs:
       - name: Build executable
         run: |
           pyinstaller --onefile --name CryptoTicker main.py
+          mv dist/CryptoTicker dist/CryptoTicker-Linux
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: CryptoTicker-Linux
-          path: dist/CryptoTicker
+          path: dist/CryptoTicker-Linux
 
   create-release:
     needs: [build-windows, build-macos, build-linux]
@@ -104,6 +107,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Extracting changelog for version $VERSION"
+          # Extract section between this version header and next version header (or end of file)
+          NOTES=$(awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+          # Handle multi-line output for GitHub Actions
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
@@ -111,7 +126,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            CryptoTicker-Windows/CryptoTicker.exe
-            CryptoTicker-macOS/CryptoTicker.app
-            CryptoTicker-Linux/CryptoTicker
-          generate_release_notes: true
+            CryptoTicker-Windows/CryptoTicker-Windows.exe
+            CryptoTicker-macOS/CryptoTicker-macOS
+            CryptoTicker-Linux/CryptoTicker-Linux
+          body: ${{ steps.changelog.outputs.notes }}
