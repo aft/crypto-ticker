@@ -1,4 +1,4 @@
-"""CoinGecko API integration with caching and retry logic."""
+"""CryptoCompare API integration with caching and retry logic."""
 
 import json
 import time
@@ -58,11 +58,20 @@ class APIState:
         return None
 
 
-class CoinGeckoAPI:
-    """CoinGecko API client with caching and retry logic."""
+class CryptoAPI:
+    """CryptoCompare API client with caching and retry logic."""
 
-    BASE_URL = "https://api.coingecko.com/api/v3"
+    BASE_URL = "https://min-api.cryptocompare.com/data"
     CACHE_DURATION = timedelta(hours=24)
+
+    # CryptoCompare supports these common fiat currencies
+    SUPPORTED_CURRENCIES = [
+        "usd", "eur", "gbp", "jpy", "cad", "aud", "chf", "cny",
+        "krw", "rub", "inr", "brl", "zar", "mxn", "sgd", "hkd",
+        "nok", "sek", "dkk", "pln", "czk", "huf", "ils", "try",
+        "thb", "php", "idr", "myr", "nzd", "twd", "aed", "ars",
+        "clp", "cop", "egp", "ngn", "pkr", "sar", "uah", "vnd",
+    ]
 
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
@@ -99,7 +108,7 @@ class CoinGeckoAPI:
                 pass
         return None
 
-    def _save_cache(self, name: str, data: dict):
+    def _save_cache(self, name: str, data):
         """Save data to cache."""
         cache_path = self._get_cache_path(name)
         try:
@@ -127,16 +136,15 @@ class CoinGeckoAPI:
         )
         def do_request():
             response = self.session.get(url, params=params, timeout=10)
-            # Check for rate limit before raising
             if response.status_code == 429:
                 raise RateLimitError("Rate limited by API")
             response.raise_for_status()
             data = response.json()
-            # CoinGecko may return error in JSON body
-            if isinstance(data, dict) and "status" in data:
-                status = data["status"]
-                if isinstance(status, dict) and status.get("error_code") == 429:
-                    raise RateLimitError(status.get("error_message", "Rate limited"))
+            # CryptoCompare error responses
+            if isinstance(data, dict) and data.get("Response") == "Error":
+                msg = data.get("Message", "API error")
+                if "rate limit" in msg.lower():
+                    raise RateLimitError(msg)
             return data
 
         try:
@@ -153,35 +161,38 @@ class CoinGeckoAPI:
             self._notify_state_change()
             return None
 
-
     def get_supported_currencies(self) -> List[str]:
-        """Get list of supported vs currencies (cached 24h)."""
-        cached = self._load_cache("supported_currencies")
-        if cached:
-            return cached
-
-        url = f"{self.BASE_URL}/simple/supported_vs_currencies"
-        data = self._make_request(url)
-        if data:
-            self._save_cache("supported_currencies", data)
-            return data
-        return ["usd", "eur", "gbp", "jpy", "cad", "aud", "chf", "cny"]
+        """Get list of supported vs currencies."""
+        return list(self.SUPPORTED_CURRENCIES)
 
     def get_coin_list(self) -> List[Dict]:
-        """Get list of all coins (cached 24h)."""
+        """Get list of all coins (cached 24h).
+
+        Returns list of dicts with 'symbol' and 'name' keys,
+        matching the format expected by settings_dialog.
+        """
         cached = self._load_cache("coin_list")
         if cached:
             return cached
 
-        url = f"{self.BASE_URL}/coins/list"
-        data = self._make_request(url)
-        if data:
-            self._save_cache("coin_list", data)
-            return data
+        url = f"{self.BASE_URL}/all/coinlist"
+        data = self._make_request(url, {"summary": "true"})
+        if data and "Data" in data:
+            coins = []
+            for sym, info in data["Data"].items():
+                full_name = info.get("FullName", sym)
+                # Extract just the name part from "Name (SYM)" format
+                name = full_name.split("(")[0].strip() if "(" in full_name else full_name
+                coins.append({
+                    "symbol": info.get("Symbol", sym).lower(),
+                    "name": name,
+                })
+            self._save_cache("coin_list", coins)
+            return coins
         # Return default coins if API fails
         return [
-            {"id": "bitcoin", "symbol": "btc", "name": "Bitcoin"},
-            {"id": "ethereum", "symbol": "eth", "name": "Ethereum"},
+            {"symbol": "btc", "name": "Bitcoin"},
+            {"symbol": "eth", "name": "Ethereum"},
         ]
 
     def get_prices(self, symbols: List[str], vs_currency: str) -> Dict[str, float]:
@@ -201,38 +212,22 @@ class CoinGeckoAPI:
         if self.state.should_skip():
             return {}
 
-        # Get coin list to map symbols to IDs
-        coin_list = self.get_coin_list()
-        symbol_to_id = {coin["symbol"].lower(): coin["id"] for coin in coin_list}
+        # CryptoCompare uses symbols directly (uppercase)
+        fsyms = ",".join(s.upper() for s in symbols)
+        tsym = vs_currency.upper()
 
-        # Map requested symbols to IDs
-        ids = []
-        symbol_map = {}  # id -> symbol
-        for sym in symbols:
-            sym_lower = sym.lower()
-            if sym_lower in symbol_to_id:
-                coin_id = symbol_to_id[sym_lower]
-                ids.append(coin_id)
-                symbol_map[coin_id] = sym_lower
-
-        if not ids:
-            return {}
-
-        url = f"{self.BASE_URL}/simple/price"
-        params = {
-            "ids": ",".join(ids),
-            "vs_currencies": vs_currency,
-        }
+        url = f"{self.BASE_URL}/pricemulti"
+        params = {"fsyms": fsyms, "tsyms": tsym}
 
         data = self._make_request(url, params)
         if not data:
             return {}
 
-        # Map back to symbols
+        # Map response to lowercase symbols
         result = {}
-        for coin_id, prices in data.items():
-            if coin_id in symbol_map and vs_currency in prices:
-                result[symbol_map[coin_id]] = float(prices[vs_currency])
+        for sym_upper, prices in data.items():
+            if isinstance(prices, dict) and tsym in prices:
+                result[sym_upper.lower()] = float(prices[tsym])
 
         return result
 
@@ -262,17 +257,17 @@ class CoinGeckoAPI:
 
 
 # Module-level convenience functions
-_api: Optional[CoinGeckoAPI] = None
+_api: Optional[CryptoAPI] = None
 
 
-def init_api(cache_dir: Path) -> CoinGeckoAPI:
+def init_api(cache_dir: Path) -> CryptoAPI:
     """Initialize the global API instance."""
     global _api
-    _api = CoinGeckoAPI(cache_dir)
+    _api = CryptoAPI(cache_dir)
     return _api
 
 
-def get_api() -> Optional[CoinGeckoAPI]:
+def get_api() -> Optional[CryptoAPI]:
     """Get the global API instance."""
     return _api
 

@@ -430,12 +430,13 @@ class SettingsDialog(QDialog):
             # Add top coins first
             for sym in default_symbols:
                 self._crypto_combo.addItem(sym.upper(), sym)
-            # Add some popular others
+            # Add some popular others from the coin list
             added = set(default_symbols)
-            for coin in coin_list[:100]:
+            for coin in coin_list[:200]:
                 sym = coin.get("symbol", "").lower()
+                name = coin.get("name", "")
                 if sym and sym not in added:
-                    self._crypto_combo.addItem(f"{sym.upper()} - {coin.get('name', '')}", sym)
+                    self._crypto_combo.addItem(f"{sym.upper()} - {name}", sym)
                     added.add(sym)
         else:
             for sym in default_symbols:

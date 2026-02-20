@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.5] - 2026-02-20
+
+### Fixed
+- App stuck at launch: CoinGecko free API now returns 403 (blocked unauthenticated access)
+- Switched price data provider from CoinGecko to CryptoCompare (free, no API key required)
+- Eliminated symbol-to-ID lookup step (CryptoCompare uses symbols directly), faster price fetching
+
+### Changed
+- Supported currencies list is now hardcoded (40 common fiat currencies) instead of fetched from API
+
 ## [1.3.4] - 2024-11-24
 
 ### Added

@@ -12,6 +12,7 @@ class PriceWorker(QObject):
     secondary_fetched = Signal(dict)  # Secondary prices {symbol: price}
     fetch_error = Signal(str)  # Error message
     fetch_success = Signal()  # Successful fetch (clears error state)
+    api_paused = Signal(bool)  # API pause state changed (True = should skip)
 
     def __init__(self, parent=None):
         super().__init__(parent)
